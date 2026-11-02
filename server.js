@@ -91,6 +91,70 @@ const TREATMENT_LOOKBACK_MS = 10 * 60 * 1000;
 const configuredTreatmentCutover = Date.parse(process.env.TREATMENT_SYNC_FROM || "");
 const TREATMENT_SYNC_CUTOVER_MS = Number.isFinite(configuredTreatmentCutover) ? configuredTreatmentCutover : Date.now();
 const acceptedSourceTypes = ACCEPTED_NIGHTSCOUT_TREATMENT_TYPES;
+
+let historicalCarbBackfillDone = false;
+const CARB_BACKFILL_DAYS = 30;
+const CARB_BACKFILL_CHUNK_DAYS = 3;
+function carbIdentity(item) {
+  const at = timeOf(item);
+  return Number.isFinite(at) ? `${Math.round(at)}|${Number(item.carbs)}` : "";
+}
+async function syncHistoricalCarbs(c) {
+  if (historicalCarbBackfillDone) return;
+  const now = Date.now();
+  const start = now - CARB_BACKFILL_DAYS * 86400000;
+  let scanned = 0, sent = 0, verified = 0, skippedExisting = 0, skippedInvalid = 0;
+  for (let from = start; from < now; from += CARB_BACKFILL_CHUNK_DAYS * 86400000) {
+    const to = Math.min(now, from + CARB_BACKFILL_CHUNK_DAYS * 86400000);
+    const query = {
+      count: 5000,
+      "find[created_at][$gte]": new Date(from).toISOString(),
+      "find[created_at][$lt]": new Date(to).toISOString()
+    };
+    const source = arr(await src("/api/v1/treatments.json", query))
+      .filter(x => Number.isFinite(timeOf(x)) && timeOf(x) >= from && timeOf(x) < to &&
+        (x.eventType === "Meal" || x.eventType === "Meal Bolus") && Number(x.carbs) > 0);
+    const existing = arr(await dst("/api/v1/treatments.json", query));
+    const known = new Set(existing.filter(x => x.eventType === "Carb Correction" && Number(x.carbs) > 0).map(carbIdentity));
+    const sourceSeen = new Set();
+    const pending = [];
+    for (const meal of source) {
+      scanned++;
+      const key = carbIdentity(meal);
+      if (!key) { skippedInvalid++; continue; }
+      if (sourceSeen.has(key) || known.has(key)) { skippedExisting++; continue; }
+      sourceSeen.add(key);
+      const payload = {
+        eventType: "Carb Correction",
+        created_at: meal.created_at || new Date(timeOf(meal)).toISOString(),
+        carbs: Number(meal.carbs)
+      };
+      for (const field of ["protein", "fat", "absorptionTime", "foodType"]) {
+        if (meal[field] !== undefined && meal[field] !== null) payload[field] = meal[field];
+      }
+      const marker = sourceMarker(meal._id ? String(meal._id) : "");
+      const note = [marker, meal.notes].filter(Boolean).join(" ").trim();
+      if (note) payload.notes = note.slice(0, 1000);
+      pending.push({ payload, key });
+    }
+    for (let offset = 0; offset < pending.length; offset += 40) {
+      const batch = pending.slice(offset, offset + 40);
+      const acknowledgements = arr(await post("/api/v1/treatments.json", batch.map(x => x.payload)));
+      sent += batch.length;
+      const after = arr(await dst("/api/v1/treatments.json", query));
+      const afterKeys = new Set(after.filter(x => x.eventType === "Carb Correction" && Number(x.carbs) > 0).map(carbIdentity));
+      for (const item of batch) {
+        if (afterKeys.has(item.key)) { verified++; known.add(item.key); }
+      }
+      if (acknowledgements.length !== batch.length) {
+        // Read-back, not the POST acknowledgement, is the source of truth.
+      }
+    }
+  }
+  c.carbBackfill = { windowDays: CARB_BACKFILL_DAYS, sourceMealsWithCarbs: scanned, carbEventsSent: sent, carbEventsVerified: verified, alreadyPresentOrRepeated: skippedExisting, invalid: skippedInvalid };
+  c.carbBackfillUnverified = sent - verified;
+  historicalCarbBackfillDone = true;
+}
 async function inspectTreatments(c) {
   // Read-only 24h comparison. This diagnoses GGC's read-back behavior without
   // posting anything or logging clinical values, timestamps, notes, or IDs.
@@ -329,7 +393,7 @@ async function runSync({ includeTreatments = true, glucoseOnly = false } = {}) {
   try {
     const tasks = [syncEntries(c)];
     if (!glucoseOnly) {
-      if (includeTreatments) tasks.push(syncTreatments(c));
+      if (includeTreatments) tasks.push((async () => { await syncTreatments(c); await syncHistoricalCarbs(c); })());
       else {
         c.treatmentSyncSkipped = "startup_safety";
         tasks.push(inspectTreatments(c));
