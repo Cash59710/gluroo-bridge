@@ -71,20 +71,25 @@ export function normalizeTempBasal(source) {
 
   out.temp = mode;
   if (hasValue(source?.duration)) out.duration = Number(source.duration);
-  if (hasPercent) out.percent = Number(source.percent);
 
-  // For absolute-mode AAPS records, absolute is authoritative; rate is a
-  // compatible Gluroo journal field. Preserve an explicit zero in both.
-  if (hasAbsolute) {
-    out.absolute = Number(source.absolute);
-    out.rate = Number(source.absolute);
-  } else if (mode === "absolute" && hasRate) {
-    out.absolute = Number(source.rate);
-    out.rate = Number(source.rate);
-  } else if (hasRate) {
-    // Keep a supplied rate even for percent-mode records; never reinterpret
-    // a percent as U/h or invent a conversion without the historical profile.
-    out.rate = Number(source.rate);
+  if (mode === "percent") {
+    // GGC uses absolute as the raw rate when temp is percent.
+    // AAPS/Nightscout rate is the effective basal in U/h; preserve both so
+    // the graph can show delivered basal and its deviation from the profile.
+    const percentValue = hasPercent ? source.percent : hasAbsolute ? source.absolute : undefined;
+    if (hasValue(percentValue)) {
+      out.percent = Number(percentValue);
+      out.absolute = Number(percentValue);
+    }
+    if (hasRate) out.rate = Number(source.rate);
+  } else {
+    // In absolute mode, zero is a real basal suspension, not missing data.
+    const absoluteValue = hasAbsolute ? source.absolute : source.rate;
+    if (hasValue(absoluteValue)) {
+      out.absolute = Number(absoluteValue);
+      out.rate = Number(absoluteValue);
+    }
+    if (hasPercent) out.percent = Number(source.percent);
   }
 
   return out;
@@ -104,10 +109,15 @@ export function treatmentsEquivalent(source, readBack, toleranceMs = 1000) {
 
   const comparisonType = canonicalType(source.eventType);
   if (comparisonType === "Temp Basal") {
-    const comparable = ["absolute", "percent", "rate", "duration"].filter(field =>
-      hasValue(source[field]) && hasValue(readBack[field])
-    );
-    if (!comparable.length || !comparable.some(field => valuesEqual(source[field], readBack[field]))) return false;
+    const comparisons = [];
+    if (hasValue(source.absolute) && hasValue(readBack.absolute)) comparisons.push([source.absolute, readBack.absolute]);
+    if (hasValue(source.percent)) {
+      if (hasValue(readBack.percent)) comparisons.push([source.percent, readBack.percent]);
+      else if (source.temp === "percent" && hasValue(readBack.absolute)) comparisons.push([source.percent, readBack.absolute]);
+    }
+    if (hasValue(source.rate) && hasValue(readBack.rate)) comparisons.push([source.rate, readBack.rate]);
+    if (hasValue(source.duration) && hasValue(readBack.duration)) comparisons.push([source.duration, readBack.duration]);
+    if (!comparisons.length || !comparisons.some(([left, right]) => valuesEqual(left, right))) return false;
     if (hasValue(source.temp) && hasValue(readBack.temp) && source.temp !== readBack.temp) return false;
     return true;
   }
