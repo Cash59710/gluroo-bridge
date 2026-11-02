@@ -93,13 +93,14 @@ const TREATMENT_SYNC_CUTOVER_MS = Number.isFinite(configuredTreatmentCutover) ? 
 const acceptedSourceTypes = ACCEPTED_NIGHTSCOUT_TREATMENT_TYPES;
 
 let historicalCarbBackfillDone = false;
+let historicalCarbBackfillPromise = null;
 const CARB_BACKFILL_DAYS = 30;
 const CARB_BACKFILL_CHUNK_DAYS = 3;
 function carbIdentity(item) {
   const at = timeOf(item);
   return Number.isFinite(at) ? `${Math.round(at)}|${Number(item.carbs)}` : "";
 }
-async function syncHistoricalCarbs(c) {
+async function performHistoricalCarbBackfill(c) {
   if (historicalCarbBackfillDone) return;
   const now = Date.now();
   const start = now - CARB_BACKFILL_DAYS * 86400000;
@@ -155,6 +156,27 @@ async function syncHistoricalCarbs(c) {
   c.carbBackfillUnverified = sent - verified;
   historicalCarbBackfillDone = true;
   console.log(JSON.stringify({ event: "carb_backfill_finished", counts: c.carbBackfill, unverified: c.carbBackfillUnverified }));
+}
+async function syncHistoricalCarbs(c) {
+  if (historicalCarbBackfillDone) return;
+  // A startup backfill and an authenticated scheduler sync can arrive together.
+  // Share one in-flight promise so the same history window is never POSTed twice.
+  if (historicalCarbBackfillPromise) {
+    const result = await historicalCarbBackfillPromise;
+    if (c && result) Object.assign(c, result);
+    return;
+  }
+  historicalCarbBackfillPromise = (async () => {
+    const summary = {};
+    await performHistoricalCarbBackfill(summary);
+    return summary;
+  })();
+  try {
+    const result = await historicalCarbBackfillPromise;
+    if (c && result) Object.assign(c, result);
+  } finally {
+    historicalCarbBackfillPromise = null;
+  }
 }
 async function inspectTreatments(c) {
   // Read-only 24h comparison. This diagnoses GGC's read-back behavior without
