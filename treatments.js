@@ -1,6 +1,5 @@
 export const READABLE_GLUROO_TREATMENT_TYPES = new Set([
   "Correction Bolus",
-  "Meal Bolus",
   "Carb Correction",
   "Temp Basal",
   "Basal Insulin Dose"
@@ -17,7 +16,7 @@ export const ACCEPTED_NIGHTSCOUT_TREATMENT_TYPES = new Set([
 
 export function normalizeTreatmentType(sourceType) {
   if (sourceType === "Meal") return "Carb Correction";
-  if (sourceType === "Meal Bolus") return "Meal Bolus";
+  if (sourceType === "Meal Bolus") return "Correction Bolus";
   if (["Bolus", "SMB", "Combo Bolus"].includes(sourceType)) return "Correction Bolus";
   return READABLE_GLUROO_TREATMENT_TYPES.has(sourceType) ? sourceType : null;
 }
