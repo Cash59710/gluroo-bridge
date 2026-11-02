@@ -1,5 +1,6 @@
 export const READABLE_GLUROO_TREATMENT_TYPES = new Set([
   "Correction Bolus",
+  "Meal Bolus",
   "Carb Correction",
   "Temp Basal",
   "Basal Insulin Dose"
@@ -16,7 +17,8 @@ export const ACCEPTED_NIGHTSCOUT_TREATMENT_TYPES = new Set([
 
 export function normalizeTreatmentType(sourceType) {
   if (sourceType === "Meal") return "Carb Correction";
-  if (["Meal Bolus", "Bolus", "SMB", "Combo Bolus"].includes(sourceType)) return "Correction Bolus";
+  if (sourceType === "Meal Bolus") return "Meal Bolus";
+  if (["Bolus", "SMB", "Combo Bolus"].includes(sourceType)) return "Correction Bolus";
   return READABLE_GLUROO_TREATMENT_TYPES.has(sourceType) ? sourceType : null;
 }
 
@@ -57,7 +59,12 @@ function valuesEqual(left, right) {
 // This avoids false negatives from optional fields such as Temp Basal's
 // inferred "temp" mode while still refusing partial carb/insulin matches.
 export function treatmentsEquivalent(source, readBack, toleranceMs = 1000) {
-  if (!source || !readBack || source.eventType !== readBack.eventType) return false;
+  if (!source || !readBack) return false;
+  // Gluroo may expose an uploaded Meal Bolus as Correction Bolus on read-back.
+  // Preserve Meal Bolus on POST, but compare the two representations as the same
+  // underlying insulin/carbohydrate event for safe deduplication.
+  const canonicalType = value => value === "Meal Bolus" ? "Correction Bolus" : value;
+  if (canonicalType(source.eventType) !== canonicalType(readBack.eventType)) return false;
   const sourceAt = treatmentTime(source);
   const readBackAt = treatmentTime(readBack);
   if (!Number.isFinite(sourceAt) || !Number.isFinite(readBackAt) || Math.abs(sourceAt - readBackAt) > toleranceMs) return false;
@@ -68,7 +75,8 @@ export function treatmentsEquivalent(source, readBack, toleranceMs = 1000) {
     "Temp Basal": ["absolute", "duration", "temp"],
     "Basal Insulin Dose": ["insulin"]
   };
-  const fields = fieldsByType[source.eventType];
+  const comparisonType = canonicalType(source.eventType);
+  const fields = fieldsByType[comparisonType];
   if (!fields) return false;
 
   const required = {
@@ -76,7 +84,7 @@ export function treatmentsEquivalent(source, readBack, toleranceMs = 1000) {
     "Carb Correction": ["carbs"].filter(field => hasValue(source[field])),
     "Temp Basal": ["absolute"].filter(field => hasValue(source[field])),
     "Basal Insulin Dose": ["insulin"].filter(field => hasValue(source[field]))
-  }[source.eventType];
+  }[comparisonType];
   if (!required.length) return false;
 
   for (const field of fields) {
