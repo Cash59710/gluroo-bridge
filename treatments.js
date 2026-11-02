@@ -36,10 +36,11 @@ export function treatmentIdentity(value) {
     value?.carbs ?? "",
     value?.duration ?? "",
     value?.temp ?? "",
-    value?.absolute ?? ""
+    value?.absolute ?? "",
+    value?.percent ?? "",
+    value?.rate ?? ""
   ].join("|");
 }
-
 
 function hasValue(value) {
   return value !== undefined && value !== null && value !== "";
@@ -53,60 +54,90 @@ function valuesEqual(left, right) {
   return String(left) === String(right);
 }
 
-// Compare only the fields Gluroo actually returns, but require every
-// clinically meaningful field present on the Nightscout source to survive.
-// This avoids false negatives from optional fields such as Temp Basal's
-// inferred "temp" mode while still refusing partial carb/insulin matches.
+/**
+ * Normalize Nightscout/AAPS temporary basal records without losing the
+ * distinction between absolute U/h and percentage-of-profile values.
+ * Explicit zeroes are intentionally retained (0 is not a missing value).
+ */
+export function normalizeTempBasal(source) {
+  const out = {};
+  const sourceMode = String(source?.temp || "").toLowerCase();
+  const hasAbsolute = hasValue(source?.absolute);
+  const hasRate = hasValue(source?.rate);
+  const hasPercent = hasValue(source?.percent);
+  const mode = sourceMode === "percent" || (sourceMode !== "absolute" && !hasAbsolute && hasPercent)
+    ? "percent"
+    : "absolute";
+
+  out.temp = mode;
+  if (hasValue(source?.duration)) out.duration = Number(source.duration);
+
+  if (mode === "percent") {
+    // GGC uses absolute as the raw rate when temp is percent.
+    // AAPS/Nightscout rate is the effective basal in U/h; preserve both so
+    // the graph can show delivered basal and its deviation from the profile.
+    const percentValue = hasPercent ? source.percent : hasAbsolute ? source.absolute : undefined;
+    if (hasValue(percentValue)) {
+      out.percent = Number(percentValue);
+      out.absolute = Number(percentValue);
+    }
+    if (hasRate) out.rate = Number(source.rate);
+  } else {
+    // In absolute mode, zero is a real basal suspension, not missing data.
+    const absoluteValue = hasAbsolute ? source.absolute : source.rate;
+    if (hasValue(absoluteValue)) {
+      out.absolute = Number(absoluteValue);
+      out.rate = Number(absoluteValue);
+    }
+    if (hasPercent) out.percent = Number(source.percent);
+  }
+
+  return out;
+}
+
+// GGC can normalize Temp Basal duration/rate when converting a journal entry
+// back to Nightscout format. Match only when the timestamp/type and at least
+// one available basal quantity agree, while respecting mode when both sides
+// expose it. This supports absolute, percentage, and zero-temp records.
 export function treatmentsEquivalent(source, readBack, toleranceMs = 1000) {
   if (!source || !readBack) return false;
-  // Gluroo may expose an uploaded Meal Bolus as Correction Bolus on read-back.
-  // Preserve Meal Bolus on POST, but compare the two representations as the same
-  // underlying insulin/carbohydrate event for safe deduplication.
   const canonicalType = value => value === "Meal Bolus" ? "Correction Bolus" : value;
   if (canonicalType(source.eventType) !== canonicalType(readBack.eventType)) return false;
   const sourceAt = treatmentTime(source);
   const readBackAt = treatmentTime(readBack);
   if (!Number.isFinite(sourceAt) || !Number.isFinite(readBackAt) || Math.abs(sourceAt - readBackAt) > toleranceMs) return false;
 
-  const fieldsByType = {
-    "Correction Bolus": ["insulin", "carbs", "protein", "fat", "absorptionTime", "duration"],
-    "Carb Correction": ["carbs", "protein", "fat", "absorptionTime", "foodType"],
-    "Temp Basal": ["absolute", "duration", "temp"],
-    "Basal Insulin Dose": ["insulin"]
-  };
   const comparisonType = canonicalType(source.eventType);
-  const fields = fieldsByType[comparisonType];
-  if (!fields) return false;
-
-  // GGC can normalize a Temp Basal's duration/rate when it converts the
-  // journal entry back to Nightscout format. Requiring every source field
-  // to match caused already-stored basal changes to be POSTed repeatedly.
-  // The event timestamp + type identify the basal change; at least one
-  // available clinical field must also agree before treating it as stored.
   if (comparisonType === "Temp Basal") {
-    const comparable = ["absolute", "duration"].filter(field =>
-      hasValue(source[field]) && hasValue(readBack[field])
-    );
-    if (!comparable.length) return false;
-    if (!comparable.some(field => valuesEqual(source[field], readBack[field]))) return false;
+    const comparisons = [];
+    if (hasValue(source.absolute) && hasValue(readBack.absolute)) comparisons.push([source.absolute, readBack.absolute]);
+    if (hasValue(source.percent)) {
+      if (hasValue(readBack.percent)) comparisons.push([source.percent, readBack.percent]);
+      else if ((source.temp === "percent" || (!hasValue(source.temp) && !hasValue(source.absolute))) && hasValue(readBack.absolute)) comparisons.push([source.percent, readBack.absolute]);
+    }
+    if (hasValue(source.rate) && hasValue(readBack.rate)) comparisons.push([source.rate, readBack.rate]);
+    if (hasValue(source.duration) && hasValue(readBack.duration)) comparisons.push([source.duration, readBack.duration]);
+    if (!comparisons.length || !comparisons.some(([left, right]) => valuesEqual(left, right))) return false;
     if (hasValue(source.temp) && hasValue(readBack.temp) && source.temp !== readBack.temp) return false;
     return true;
   }
 
+  const fieldsByType = {
+    "Correction Bolus": ["insulin", "carbs", "protein", "fat", "absorptionTime", "duration"],
+    "Carb Correction": ["carbs", "protein", "fat", "absorptionTime", "foodType"],
+    "Basal Insulin Dose": ["insulin"]
+  };
+  const fields = fieldsByType[comparisonType];
+  if (!fields) return false;
   const required = {
     "Correction Bolus": ["insulin", "carbs"].filter(field => hasValue(source[field])),
     "Carb Correction": ["carbs"].filter(field => hasValue(source[field])),
-    "Temp Basal": ["absolute"].filter(field => hasValue(source[field])),
     "Basal Insulin Dose": ["insulin"].filter(field => hasValue(source[field]))
   }[comparisonType];
   if (!required.length) return false;
-
   for (const field of fields) {
     if (hasValue(source[field]) && !valuesEqual(source[field], readBack[field])) return false;
   }
-  // AAPS absolute temp-basal uploads may omit Nightscout's mode flag.
-  // When absolute is present, the bridge explicitly sends "absolute".
-  if (source.eventType === "Temp Basal" && hasValue(source.absolute) && !hasValue(source.temp) && readBack.temp !== "absolute") return false;
   return true;
 }
 

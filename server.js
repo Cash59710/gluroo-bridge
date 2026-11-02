@@ -1,5 +1,5 @@
 import http from "node:http";
-import { ACCEPTED_NIGHTSCOUT_TREATMENT_TYPES, normalizeTreatmentType, treatmentIdentity, treatmentsEquivalent, sourceMarker, hasSourceMarker } from "./treatments.js";
+import { ACCEPTED_NIGHTSCOUT_TREATMENT_TYPES, normalizeTreatmentType, normalizeTempBasal, treatmentIdentity, treatmentsEquivalent, sourceMarker, hasSourceMarker } from "./treatments.js";
 
 const PORT = Number(process.env.PORT || 10000);
 const NS_BASE = (process.env.NIGHTSCOUT_URL || "https://cgm-remote-monitor-glok.onrender.com").replace(/\/$/, "");
@@ -318,12 +318,10 @@ async function syncTreatments(c) {
     if (!marker && keys.has(treatmentKey(normalized))) continue;
     const created_at = x.created_at || new Date(timeOf(x)).toISOString();
     const out = { eventType, created_at };
-    // AAPS emits absolute temp basals with an `absolute` rate but may omit
-    // the Nightscout `temp` discriminator. GGC needs it to interpret the rate.
-    if (eventType === "Temp Basal" && !x.temp && x.absolute !== undefined && x.absolute !== null) out.temp = "absolute";
-    // Preserve the absolute U/h value and expose the `rate` field used by the Gluroo journal template.
-    if (eventType === "Temp Basal" && x.absolute !== undefined && x.absolute !== null) out.rate = Number(x.absolute);
-    for (const k of ["insulin","carbs","protein","fat","absorptionTime","foodType","duration","temp","absolute"]) if (x[k] !== undefined && x[k] !== null) out[k] = x[k];
+    // Keep both AAPS/Nightscout basal representations: absolute U/h and
+    // percentage of profile. Explicit 0 values must survive unchanged.
+    if (eventType === "Temp Basal") Object.assign(out, normalizeTempBasal(x));
+    for (const k of ["insulin","carbs","protein","fat","absorptionTime","foodType"]) if (x[k] !== undefined && x[k] !== null) out[k] = x[k];
     const note = [marker, x.notes].filter(Boolean).join(" ").trim();
     if (note) out.notes = note.slice(0, 1000);
     if (x.enteredBy) out.enteredBy = "Nightscout bridge";
