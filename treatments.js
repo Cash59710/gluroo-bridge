@@ -23,7 +23,7 @@ export function normalizeTreatmentType(sourceType) {
 
 export function treatmentTime(value) {
   const v = value?.date ?? value?.mills ?? value?.created_at ?? value?.timestamp ?? value?.eventTime;
-  const n = typeof v === "string" && !/^\\d+$/.test(v) ? Date.parse(v) : Number(v);
+  const n = typeof v === "string" && !/^\d+$/.test(v) ? Date.parse(v) : Number(v);
   return Number.isFinite(n) ? n : NaN;
 }
 
