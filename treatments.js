@@ -78,6 +78,21 @@ export function treatmentsEquivalent(source, readBack, toleranceMs = 1000) {
   const fields = fieldsByType[comparisonType];
   if (!fields) return false;
 
+  // GGC can normalize a Temp Basal's duration/rate when it converts the
+  // journal entry back to Nightscout format. Requiring every source field
+  // to match caused already-stored basal changes to be POSTed repeatedly.
+  // The event timestamp + type identify the basal change; at least one
+  // available clinical field must also agree before treating it as stored.
+  if (comparisonType === "Temp Basal") {
+    const comparable = ["absolute", "duration"].filter(field =>
+      hasValue(source[field]) && hasValue(readBack[field])
+    );
+    if (!comparable.length) return false;
+    if (!comparable.some(field => valuesEqual(source[field], readBack[field]))) return false;
+    if (hasValue(source.temp) && hasValue(readBack.temp) && source.temp !== readBack.temp) return false;
+    return true;
+  }
+
   const required = {
     "Correction Bolus": ["insulin", "carbs"].filter(field => hasValue(source[field])),
     "Carb Correction": ["carbs"].filter(field => hasValue(source[field])),
