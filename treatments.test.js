@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { treatmentsEquivalent } from "./treatments.js";
+import { treatmentsEquivalent, normalizeTempBasal } from "./treatments.js";
 
 const at = "2026-11-02T20:00:00.000Z";
 
@@ -47,8 +47,6 @@ test("Bolus deduplication still requires matching insulin and carbs", () => {
   ), false);
 });
 
-
-import { normalizeTempBasal } from "./treatments.js";
 
 test("absolute zero temp basal is preserved as an explicit 0 U/h rate", () => {
   assert.deepEqual(normalizeTempBasal({ temp: "absolute", absolute: 0, duration: 30 }), {
