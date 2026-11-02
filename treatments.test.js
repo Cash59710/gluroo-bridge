@@ -71,6 +71,12 @@ test("reduced and increased percentage temp basals keep their sign relative to 1
   });
 });
 
+test("AAPS percent temp basal is inferred correctly when temp mode is omitted", () => {
+  assert.deepEqual(normalizeTempBasal({ percent: 70, rate: 0.56, duration: 30 }), {
+    temp: "percent", percent: 70, absolute: 70, rate: 0.56, duration: 30
+  });
+});
+
 test("percent temp basal preserves AAPS effective rate alongside percent", () => {
   assert.deepEqual(normalizeTempBasal({ temp: "percent", percent: 0, rate: 0.0, duration: 30 }), {
     temp: "percent", percent: 0, absolute: 0, rate: 0, duration: 30
