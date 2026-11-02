@@ -87,9 +87,12 @@ async function syncEntries(c) {
 // verification and source-marker deduplication work on every scheduled run.
 // Keep the first sync window short: older Meal/Meal Bolus posts may already
 // exist but be invisible to GET, so replaying 30 days would risk duplicates.
-const TREATMENT_LOOKBACK_MS = 10 * 60 * 1000;
+// Reconcile a full day of treatments on every scheduled run. Render Free can
+// sleep and cold-start between scheduler calls; a process-start cutover would
+// silently discard treatments created while the service was asleep.
+const TREATMENT_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 const configuredTreatmentCutover = Date.parse(process.env.TREATMENT_SYNC_FROM || "");
-const TREATMENT_SYNC_CUTOVER_MS = Number.isFinite(configuredTreatmentCutover) ? configuredTreatmentCutover : Date.now();
+const TREATMENT_SYNC_CUTOVER_MS = Number.isFinite(configuredTreatmentCutover) ? configuredTreatmentCutover : 0;
 const acceptedSourceTypes = ACCEPTED_NIGHTSCOUT_TREATMENT_TYPES;
 
 let historicalCarbBackfillDone = false;
