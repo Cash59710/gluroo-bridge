@@ -321,6 +321,8 @@ async function syncTreatments(c) {
     // AAPS emits absolute temp basals with an `absolute` rate but may omit
     // the Nightscout `temp` discriminator. GGC needs it to interpret the rate.
     if (eventType === "Temp Basal" && !x.temp && x.absolute !== undefined && x.absolute !== null) out.temp = "absolute";
+    // Preserve the absolute U/h value and expose the `rate` field used by the Gluroo journal template.
+    if (eventType === "Temp Basal" && x.absolute !== undefined && x.absolute !== null) out.rate = Number(x.absolute);
     for (const k of ["insulin","carbs","protein","fat","absorptionTime","foodType","duration","temp","absolute"]) if (x[k] !== undefined && x[k] !== null) out[k] = x[k];
     const note = [marker, x.notes].filter(Boolean).join(" ").trim();
     if (note) out.notes = note.slice(0, 1000);
