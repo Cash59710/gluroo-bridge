@@ -104,3 +104,10 @@ test("percentage-only Temp Basal can be verified by GGC raw percent read-back", 
     { eventType: "Temp Basal", created_at: at, temp: "percent", percent: 0, duration: 29 }
   ), true);
 });
+
+test("AAPS percent record without temp flag matches Gluroo raw percent absolute field", () => {
+  assert.equal(treatmentsEquivalent(
+    { eventType: "Temp Basal", created_at: at, percent: 0, rate: 0, duration: 30 },
+    { eventType: "Temp Basal", created_at: at, temp: "percent", absolute: 0, duration: 29 }
+  ), true);
+});
