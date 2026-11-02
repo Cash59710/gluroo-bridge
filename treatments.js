@@ -65,7 +65,7 @@ export function normalizeTempBasal(source) {
   const hasAbsolute = hasValue(source?.absolute);
   const hasRate = hasValue(source?.rate);
   const hasPercent = hasValue(source?.percent);
-  const mode = sourceMode === "percent" || (!hasAbsolute && !hasRate && hasPercent)
+  const mode = sourceMode === "percent" || (sourceMode !== "absolute" && !hasAbsolute && hasPercent)
     ? "percent"
     : "absolute";
 
@@ -113,7 +113,7 @@ export function treatmentsEquivalent(source, readBack, toleranceMs = 1000) {
     if (hasValue(source.absolute) && hasValue(readBack.absolute)) comparisons.push([source.absolute, readBack.absolute]);
     if (hasValue(source.percent)) {
       if (hasValue(readBack.percent)) comparisons.push([source.percent, readBack.percent]);
-      else if (source.temp === "percent" && hasValue(readBack.absolute)) comparisons.push([source.percent, readBack.absolute]);
+      else if ((source.temp === "percent" || (!hasValue(source.temp) && !hasValue(source.absolute))) && hasValue(readBack.absolute)) comparisons.push([source.percent, readBack.absolute]);
     }
     if (hasValue(source.rate) && hasValue(readBack.rate)) comparisons.push([source.rate, readBack.rate]);
     if (hasValue(source.duration) && hasValue(readBack.duration)) comparisons.push([source.duration, readBack.duration]);
