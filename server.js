@@ -154,6 +154,7 @@ async function syncHistoricalCarbs(c) {
   c.carbBackfill = { windowDays: CARB_BACKFILL_DAYS, sourceMealsWithCarbs: scanned, carbEventsSent: sent, carbEventsVerified: verified, alreadyPresentOrRepeated: skippedExisting, invalid: skippedInvalid };
   c.carbBackfillUnverified = sent - verified;
   historicalCarbBackfillDone = true;
+  console.log(JSON.stringify({ event: "carb_backfill_finished", counts: c.carbBackfill, unverified: c.carbBackfillUnverified }));
 }
 async function inspectTreatments(c) {
   // Read-only 24h comparison. This diagnoses GGC's read-back behavior without
@@ -447,5 +448,5 @@ const server = http.createServer(async (req, res) => {
 });
 server.listen(PORT, "0.0.0.0", () => {
   console.log("Gluroo bridge ready. Authenticated scheduler triggers five-minute syncs; no glucose values or credentials are logged.");
-  if (G_BASE && G_SHA1 && SYNC_SECRET) runSync({ includeTreatments: false }).catch(e => console.error(`Initial sync failed: ${e.message}`));
+  if (G_BASE && G_SHA1 && SYNC_SECRET) runSync({ includeTreatments: false }).then(async () => { const summary = {}; await syncHistoricalCarbs(summary); }).catch(e => console.error(`Initial sync or carb backfill failed: ${e.message}`));
 });
