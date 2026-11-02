@@ -58,16 +58,25 @@ test("absolute zero temp basal is preserved as an explicit 0 U/h rate", () => {
 
 test("zero-percent temp basal is preserved as a percentage, not mistaken for missing data", () => {
   assert.deepEqual(normalizeTempBasal({ temp: "percent", percent: 0, duration: 25 }), {
-    temp: "percent", percent: 0, duration: 25
+    temp: "percent", percent: 0, absolute: 0, duration: 25
   });
 });
 
 test("reduced and increased percentage temp basals keep their sign relative to 100 percent", () => {
   assert.deepEqual(normalizeTempBasal({ percent: 70, duration: 20 }), {
-    temp: "percent", percent: 70, duration: 20
+    temp: "percent", percent: 70, absolute: 70, duration: 20
   });
   assert.deepEqual(normalizeTempBasal({ percent: 150, duration: 20 }), {
-    temp: "percent", percent: 150, duration: 20
+    temp: "percent", percent: 150, absolute: 150, duration: 20
+  });
+});
+
+test("percent temp basal preserves AAPS effective rate alongside percent", () => {
+  assert.deepEqual(normalizeTempBasal({ temp: "percent", percent: 0, rate: 0.0, duration: 30 }), {
+    temp: "percent", percent: 0, absolute: 0, rate: 0, duration: 30
+  });
+  assert.deepEqual(normalizeTempBasal({ temp: "percent", percent: 150, rate: 1.2, duration: 30 }), {
+    temp: "percent", percent: 150, absolute: 150, rate: 1.2, duration: 30
   });
 });
 
@@ -83,7 +92,7 @@ test("rate-only absolute temp basal is normalized without dropping zero", () => 
   });
 });
 
-test("percentage-only Temp Basal can be verified by percentage read-back", () => {
+test("percentage-only Temp Basal can be verified by GGC raw percent read-back", () => {
   assert.equal(treatmentsEquivalent(
     { eventType: "Temp Basal", created_at: at, temp: "percent", percent: 0, duration: 30 },
     { eventType: "Temp Basal", created_at: at, temp: "percent", percent: 0, duration: 29 }
